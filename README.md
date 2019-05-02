@@ -1,14 +1,23 @@
 # use-case-aws-native-snapshot-replication
 
+This module takes EC2 snapshots that were created by Rubrik and replicates them to another region. Replicated snapshots will be removed when the source snapshot is removed. 
+
 ## :hammer: Installation
+
+1. Create an S3 bucket for the lambda package in the same region as the Rubrik created snapshots that are to be replicated.
+2. Upload [rubrik-aws-ec2-snap-replicate.zip](https://github.com/rubrikinc/use-case-aws-native-snapshot-replication/blob/master/files/rubrik-aws-ec2-snap-replicate.zip) to the previously created bucket.
+3. Create a new CloudFormation stack using the template [http://s3.us-west-1.amazonaws.com/cloudformation-templates-rubrik-prod/rubrik-aws-ec2-snap-replicate.yml](http://s3.us-west-1.amazonaws.com/cloudformation-templates-rubrik-prod/rubrik-aws-ec2-snap-replicate.yml])
+4. New snapshots will be replicated to the destination region.
 
 ## :mag: Example
 
+!image(docs/images/Create_Stack_Example.png)
+
 ## :blue_book: Documentation
 
-Here are some resources to get you started! If you find any challenges from this project are not properly documented or are unclear, please raise an issueand let us know! This is a fun, safe environment - don't worry if you're a GitHub newbie! :heart:
+Here are some resources to get you started! If you find any challenges from this project are not properly documented or are unclear, please raise an issue and let us know! This is a fun, safe environment - don't worry if you're a GitHub newbie! :heart:
 
-* Quick Start Guide
+* [Quick Start Guide](docs/quick-start.md)
 * [Rubrik API Documentation](https://github.com/rubrikinc/api-documentation)
 
 ## :muscle: How You Can Help
