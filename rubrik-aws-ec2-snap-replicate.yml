@@ -107,6 +107,8 @@ Resources:
               - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_CopyAmi']]
               - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_DeleteReplica']]
               - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_GetAmiStatus']]  
+              - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_GetDestAmiStatus']]  
+              - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_TagSnaps']]  
           - Effect: Allow
             Action: ec2:CreateTags
             Resource:
@@ -172,6 +174,34 @@ Resources:
       Role: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
       Runtime: python3.6
       Timeout: '180'
+  rubrikEc2GetDestAmiStatusFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: rubrikEc2SnapReplicatePolicy
+    Properties:
+      Handler: rk_GetDestAmiStatus.lambda_handler
+      Code:
+        S3Bucket: !Ref 'lambdaBucketName'
+        S3Key: rubrik-aws-ec2-snap-replicate.zip
+      Description: Lambda function used by Rubrik AWS Snap Replicate to get destination AMI copy status
+        of EC2 Native snapshots
+      FunctionName: rk_GetDestAmiStatus
+      Role: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+      Runtime: python3.6
+      Timeout: '180'
+  rubrikEc2TagSnapsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: rubrikEc2SnapReplicatePolicy
+    Properties:
+      Handler: rk_TagSnaps.lambda_handler
+      Code:
+        S3Bucket: !Ref 'lambdaBucketName'
+        S3Key: rubrik-aws-ec2-snap-replicate.zip
+      Description: Lambda function used by Rubrik AWS Snap Replicate to tag snapshots of destination AMI
+        of EC2 Native snapshots
+      FunctionName: rk_TagSnaps
+      Role: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+      Runtime: python3.6
+      Timeout: '180'
   lambdaInvokePermissionCopyAmi:
     Type: AWS::Lambda::Permission
     Properties:
@@ -188,6 +218,18 @@ Resources:
     Type: AWS::Lambda::Permission
     Properties:
       FunctionName: !GetAtt 'rubrikEc2GetAmiStatusFunction.Arn'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+  lambdaInvokePermissionGetDestAmiStatus:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'rubrikEc2GetDestAmiStatusFunction.Arn'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+  lambdaInvokePermissionTagSnaps:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'rubrikEc2TagSnapsFunction.Arn'
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
   cloudWatchEventRuleReplicateSnaps:
@@ -279,11 +321,6 @@ Resources:
             "Comment": "Copy Rubrik created AMIs and snapshots to a remote region once the AMI becomes available",
             "StartAt": "rk_GetAmiStatus",
             "States": {
-                "rk_GetAmiStatus": {
-                    "Type": "Task",
-                    "Resource":  "${rubrikEc2GetAmiStatusFunction.Arn}",
-                    "Next": "rk_StatusChoice"
-                },
                 "rk_StatusChoice": {
                     "Type": "Choice",
                     "Choices": [
@@ -309,15 +346,55 @@ Resources:
                         }
                     ]
                 },
+                "rk_DestStatusChoice": {
+                    "Type": "Choice",
+                    "Choices": [
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "failed",
+                            "Next": "rk_Fail"
+                        },
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "dest_pending",
+                            "Next": "rk_DestWait"
+                        },
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "dest_available",
+                            "Next": "rk_TagSnaps"
+                        }
+                    ]
+                },
                 "rk_CopyAmi": {
                     "Type": "Task",
                     "Resource": "${rubrikEc2CopyAmiFunction.Arn}",
+                    "Next": "rk_DestWait"
+                },
+                "rk_GetAmiStatus": {
+                    "Type": "Task",
+                    "Resource":  "${rubrikEc2GetAmiStatusFunction.Arn}",
+                    "Next": "rk_StatusChoice"
+                },
+                "rk_GetDestAmiStatus": {
+                    "Type": "Task",
+                    "Resource":  "${rubrikEc2GetDestAmiStatusFunction.Arn}",
+                    "Next": "rk_DestStatusChoice"
+                },
+                "rk_TagSnaps": {
+                    "Type": "Task",
+                    "Resource": "${rubrikEc2TagSnapsFunction.Arn}",
                     "End": true
                 },
                 "rk_Wait": {
                     "Type" : "Wait",
                     "Seconds" : 60,
                     "Next": "rk_GetAmiStatus"
+                },
+                "rk_DestWait": {
+                    "Type" : "Wait",
+                    "Seconds" : 60,
+                    "Next": "rk_GetDestAmiStatus"
                 },
                 "rk_Fail": {
                     "Type": "Fail",
@@ -337,12 +414,18 @@ Outputs:
   rubrikEc2CopyAmiFunctionARN:
     Description: ARN of the Lambda function used to copy AMIs for EC2 native protection
     Value: !GetAtt 'rubrikEc2CopyAmiFunction.Arn'
+  rubrikEc2TagSnapsFunctionARN:
+    Description: ARN of the Lambda function used to copy AMIs for EC2 native protection
+    Value: !GetAtt 'rubrikEc2TagSnapsFunction.Arn'
   rubrikEc2DeleteReplicaFunctionARN:
     Description: ARN of the Lambda function used to delete AMIs for EC2 native protection
     Value: !GetAtt 'rubrikEc2DeleteReplicaFunction.Arn'
   rubrikEc2GetAmiStatusFunctionARN:
     Description: ARN of the Lambda function used to get status of AMI copy jobs for EC2 native protection
     Value: !GetAtt 'rubrikEc2GetAmiStatusFunction.Arn'
+  rubrikEc2GetDestAmiStatusFunctionARN:
+    Description: ARN of the Lambda function used to get status of AMI copy jobs for EC2 native protection
+    Value: !GetAtt 'rubrikEc2GetDestAmiStatusFunction.Arn'
   cloudWatchEventRuleReplicateSnapsARN:
     Description: ARN of the CloudWatch Rule used to trigger the replication of AMIs for EC2 native protection
     Value: !GetAtt 'cloudWatchEventRuleReplicateSnaps.Arn'

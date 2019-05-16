@@ -11,10 +11,11 @@
 import logging
 import boto3
 import json
+import copy
 
 # logging init
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+#logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
 
@@ -26,8 +27,7 @@ def lambda_handler(event, context):
     # grab parameters from our event
     resourceId = event['resourceId']
     source_region = event['source_region']
-
-    # Configurable - Rubrik created EC2 snapshots will be copied to this region.
+    debug = event['debug']
     destination_region = event['destination_region']
 
     # KMS Flag and config
@@ -44,7 +44,7 @@ def lambda_handler(event, context):
 
     logger.info('Attempting to copy {} from {} to {}'.format(resourceId, source_region, destination_region))
 
-    if kms_enabled == True and dest_kms_key != '' and dest_kms_key != None and ( dest_kms_key != 'None' or dest_kms_key != 'none' or dest_kms_key != 'NONE' ) :
+    if kms_enabled == True and dest_kms_key != '' and dest_kms_key != None and dest_kms_key != 'None' and dest_kms_key != 'none' and dest_kms_key != 'NONE' :
 
         logger.info('kms_enabled is true and kms key param is present. attempting to encrypt destination replica using the following key: {}.'.format(dest_kms_key))
         create_destination_ami = destination_client.copy_image(
@@ -56,7 +56,7 @@ def lambda_handler(event, context):
             KmsKeyId=dest_kms_key
         )
     
-    elif kms_enabled == True and (dest_kms_key == '' or dest_kms_key == None):
+    elif kms_enabled == True and (dest_kms_key == '' or dest_kms_key == None or dest_kms_key == "None" or dest_kms_key == "none" or dest_kms_key == "NONE"):
 
         logger.info('kms_enabled is true and kms key param is NOT present. snapshots will be encrypted using the default kms CMK in the destination region.')
         create_destination_ami = destination_client.copy_image(
@@ -84,41 +84,33 @@ def lambda_handler(event, context):
 
     destination_ami = destination_resource.Image(create_destination_ami['ImageId'])
 
-    for tag in source_ami.tags:
-        if tag['Key'] == 'rk_source_cloud_native_vm_id':
-            rk_source_cloud_native_vm_id = tag['Value']
-
-        elif tag['Key'] == 'rk_source_cloud_native_vm_name':
-            rk_source_cloud_native_vm_name = tag['Value']
-
-        elif tag['Key'] == 'rk_job_id':
-            rk_job_id = tag['Value']
-
-    destination_ami.create_tags(
-        Tags=[
-            {
-                'Key': 'rk_source_ami', 
-                'Value': source_ami.id
-            },
-            {
-                'Key': 'rk_source_region', 
-                'Value': source_region
-            },
-            {
-                'Key': 'rk_source_cloud_native_vm_id', 
-                'Value': rk_source_cloud_native_vm_id
-            },
-            {
-                'Key': 'rk_source_cloud_native_vm_name', 
-                'Value': rk_source_cloud_native_vm_name
-            },
-            {
-                'Key': 'rk_job_id', 
-                'Value': rk_job_id
-            }
-        ]
-    )
+    cur_tags = boto3_tag_list_to_ansible_dict(source_ami.tags)
+    new_tags = copy.deepcopy(cur_tags)
+    new_tags['rk_source_ami'] = source_ami.id
+    new_tags['rk_source_region'] = source_region
+    if debug:
+        logger.info('Tags are {}'.format(new_tags))
+    destination_ami.create_tags(Tags=ansible_dict_to_boto3_tag_list(new_tags))
 
     logger.info('New AMI in {} is {}'.format(destination_region, destination_ami.id))
 
-    return create_destination_ami
+    event['destination_ami_id'] = create_destination_ami['ImageId']
+    return event
+
+def boto3_tag_list_to_ansible_dict(tags_list):
+    tags_dict = {}
+    for tag in tags_list:
+        if 'key' in tag and not tag['key'].startswith('aws:'):
+            tags_dict[tag['key']] = tag['value']
+        elif 'Key' in tag and not tag['Key'].startswith('aws:'):
+            tags_dict[tag['Key']] = tag['Value']
+
+    return tags_dict
+
+
+def ansible_dict_to_boto3_tag_list(tags_dict):
+    tags_list = []
+    for k, v in tags_dict.items():
+        tags_list.append({'Key': k, 'Value': v})
+
+    return tags_list

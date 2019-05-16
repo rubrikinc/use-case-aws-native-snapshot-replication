@@ -44,5 +44,5 @@ def lambda_handler(event, context):
         return event
     else:
         event['rkstatus'] = 'failed'
-        logger.info('{} is failed, quitting')
+        logger.info('{} is failed, quitting'.format(event['resourceId']))
         return event
