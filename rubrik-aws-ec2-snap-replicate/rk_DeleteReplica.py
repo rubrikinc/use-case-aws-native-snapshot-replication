@@ -24,9 +24,9 @@ def lambda_handler(event, context):
     logger.info(data)
 
     # grab parameters from our event
-    resourceId = event['resourceId']
+    resource_id = event['resource_id']
     source_region = event['source_region']
-    logger.info('Source ami in {} is {}'.format(resourceId, source_region))
+    logger.info('Source ami in {} is {}'.format(resource_id, source_region))
 
     # Configurable - Rubrik created EC2 snapshots will be deleted from this region.
     destination_region = event['destination_region']
@@ -37,14 +37,14 @@ def lambda_handler(event, context):
     destination_client = boto3.client('ec2', destination_region)
 
     # look up the image we need to deregister in our destination region
-    response = destination_client.describe_images(Filters=[{'Name':'tag:rk_source_ami', 'Values':[resourceId]},{'Name':'tag:rk_source_region', 'Values':[source_region]}])
+    response = destination_client.describe_images(Filters=[{'Name':'tag:rk_source_ami', 'Values':[resource_id]},{'Name':'tag:rk_source_region', 'Values':[source_region]}])
 
     # get the image object in destination region if the image exists
     try:
-        logger.info('Attempting to find replica ami in {} corresponding to {} in {}'.format(destination_region, resourceId, source_region))
+        logger.info('Attempting to find replica ami in {} corresponding to {} in {}'.format(destination_region, resource_id, source_region))
         destination_ami = destination_resource.Image(response['Images'][0]['ImageId'])
     except IndexError:
-        logger.info('No replica corresponding to {} found, exiting.'.format(resourceId))
+        logger.info('No replica corresponding to {} found, exiting.'.format(resource_id))
         return 'IndexError'
 
     logger.info('Found replica ami {} in {}'.format(destination_ami.image_id, destination_region))    

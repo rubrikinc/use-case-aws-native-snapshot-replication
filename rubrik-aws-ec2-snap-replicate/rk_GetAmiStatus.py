@@ -23,26 +23,26 @@ def lambda_handler(event, context):
 
     
     # check resource type - quit if not an ami, check ami status if an ami
-    if 'ami-' not in event['resourceId']:
+    if 'ami-' not in event['resource_id']:
         logger.info('Resource is not an AMI, quitting.')
         event['rkstatus'] = 'noami'
         return event
     else:
-        logger.info('{} is an AMI, verifying state...'.format(event['resourceId']))
+        logger.info('{} is an AMI, verifying state...'.format(event['resource_id']))
     
-    ec2resource = boto3.resource('ec2', event['source_region'])
-    source_ami = ec2resource.Image(event['resourceId'])
+    ec2_resource = boto3.resource('ec2', event['source_region'])
+    source_ami = ec2_resource.Image(event['resource_id'])
     
     # return status in modified event
     if source_ami.state == 'available':
         event['rkstatus'] = 'available'
-        logger.info('{} is available, copy operation can proceed.'.format(event['resourceId']))
+        logger.info('{} is available, copy operation can proceed.'.format(event['resource_id']))
         return event
     elif source_ami.state == 'pending':
         event['rkstatus'] = 'pending'
-        logger.info('{} is pending, sleeping.'.format(event['resourceId']))
+        logger.info('{} is pending, sleeping.'.format(event['resource_id']))
         return event
     else:
         event['rkstatus'] = 'failed'
-        logger.info('{} is failed, quitting'.format(event['resourceId']))
+        logger.info('{} is failed, quitting'.format(event['resource_id']))
         return event

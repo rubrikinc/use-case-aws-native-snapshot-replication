@@ -25,7 +25,7 @@ def lambda_handler(event, context):
     logger.info(data)
 
     # grab parameters from our event
-    resourceId = event['resourceId']
+    resource_id = event['resource_id']
     source_region = event['source_region']
     debug = event['debug']
     destination_region = event['destination_region']
@@ -40,15 +40,15 @@ def lambda_handler(event, context):
     destination_client = boto3.client('ec2', destination_region)
 
     # source AMI
-    source_ami = source_resource.Image(resourceId)
+    source_ami = source_resource.Image(resource_id)
 
-    logger.info('Attempting to copy {} from {} to {}'.format(resourceId, source_region, destination_region))
+    logger.info('Attempting to copy {} from {} to {}'.format(resource_id, source_region, destination_region))
 
-    if kms_enabled == True and dest_kms_key != '' and dest_kms_key != None and dest_kms_key != 'None' and dest_kms_key != 'none' and dest_kms_key != 'NONE' :
+    if kms_enabled == True and dest_kms_key != '' and dest_kms_key != None and dest_kms_key != 'Default':
 
         logger.info('kms_enabled is true and kms key param is present. attempting to encrypt destination replica using the following key: {}.'.format(dest_kms_key))
         create_destination_ami = destination_client.copy_image(
-            Description='Replica of {} from {}'.format(resourceId, source_region),
+            Description='Replica of {} from {}'.format(resource_id, source_region),
             Name=source_ami.name.replace('Rubrik-Snapshot','Rubrik-Replica'),
             SourceImageId=source_ami.id,
             SourceRegion=source_region,
@@ -56,11 +56,11 @@ def lambda_handler(event, context):
             KmsKeyId=dest_kms_key
         )
     
-    elif kms_enabled == True and (dest_kms_key == '' or dest_kms_key == None or dest_kms_key == "None" or dest_kms_key == "none" or dest_kms_key == "NONE"):
+    elif kms_enabled == True and (dest_kms_key == '' or dest_kms_key == None or dest_kms_key == "Default"):
 
         logger.info('kms_enabled is true and kms key param is NOT present. snapshots will be encrypted using the default kms CMK in the destination region.')
         create_destination_ami = destination_client.copy_image(
-            Description='Replica of {} from {}'.format(resourceId, source_region),
+            Description='Replica of {} from {}'.format(resource_id, source_region),
             Name=source_ami.name.replace('Rubrik-Snapshot','Rubrik-Replica'),
             SourceImageId=source_ami.id,
             SourceRegion=source_region,
@@ -76,7 +76,7 @@ def lambda_handler(event, context):
                 logger.info('snapshot {} is encrypted and associated with {}. since no kms CMK was specified for {} the snapshot will be copied to the destination using the default kms CMK in that region.'.format(snapshot.snapshot_id, source_ami.image_id, destination_region))
 
         create_destination_ami = destination_client.copy_image(
-            Description='Replica of {} from {}'.format(resourceId, source_region),
+            Description='Replica of {} from {}'.format(resource_id, source_region),
             Name=source_ami.name.replace('Rubrik-Snapshot','Rubrik-Replica'),
             SourceImageId=source_ami.id,
             SourceRegion=source_region

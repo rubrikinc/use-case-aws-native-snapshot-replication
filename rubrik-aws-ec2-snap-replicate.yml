@@ -72,8 +72,8 @@ Parameters:
       encrypted with the specified key or the default key in the region if none is
       specified.
     Type: String
-    Default: 'None'
-    AllowedPattern: .+
+    Default: 'Default'
+    AllowedPattern: Default|^[a-z0-9]{8}\-[a-z0-9]{4}\-[a-z0-9]{4}\-[a-z0-9]{4}\-[a-z0-9]{12}$
 Resources:
   rubrikEc2SnapReplicatePolicy:
     Type: AWS::IAM::Policy
@@ -81,27 +81,34 @@ Resources:
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
-          - Effect: Allow
+          - Sid: "GlobalPermissions"
+            Effect: Allow
             Action:
               - ec2:CopyImage
               - ec2:CopySnapshot
               - ec2:DeregisterImage
               - ec2:DescribeImages
               - ec2:DescribeSnapshots
+              - kms:ListKeys
+              - kms:ListAliases
               - logs:CreateLogGroup
               - logs:CreateLogStream
               - logs:PutLogEvents
             Resource: '*'
-          - Effect: Allow
+          - Sid: "EC2Permissions"
+            Effect: Allow
             Action: ec2:DeleteSnapshot
             Resource: !Join [':', ['arn:aws:ec2', Ref: 'destRegion', ':snapshot/*']]
-          - Effect: Allow
+          - Sid: "RolePermissions"
+            Effect: Allow
             Action: sts:AssumeRole
             Resource: !Join [':', ['arn:aws:iam:', Ref: 'AWS::AccountId', 'role/rubrikEc2SnapReplicateRole']]
-          - Effect: Allow
+          - Sid: "StateMachinePermission"
+            Effect: Allow
             Action: states:StartExecution
             Resource: !Join [':', ['arn:aws:states',Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'stateMachine:rk_CopySnap']]
-          - Effect: Allow
+          - Sid: "LambdaPermissions"
+            Effect: Allow
             Action: lambda:InvokeFunction
             Resource:
               - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_CopyAmi']]
@@ -109,11 +116,30 @@ Resources:
               - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_GetAmiStatus']]  
               - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_GetDestAmiStatus']]  
               - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_TagSnaps']]  
-          - Effect: Allow
+          - Sid: "TagPermissions"
+            Effect: Allow
             Action: ec2:CreateTags
             Resource:
               - !Join [':', ['arn:aws:ec2', Ref: 'destRegion',':image/*']]
               - !Join [':', ['arn:aws:ec2', Ref: 'destRegion',':snapshot/*']]
+          - Sid: "SourceKMSPermissions"
+            Effect: Allow
+            Action: 
+              - kms:DescribeKey
+              - kms:CreateGrant
+              - kms:Decrypt
+            Resource:
+              - !Join [':', ['arn:aws:kms', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'key/*']]
+          - Sid: "TargetKMSPermissions"
+            Effect: Allow
+            Action: 
+              - kms:CreateGrant
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource:
+              - !Join [':', ['arn:aws:kms', Ref: 'destRegion', Ref: 'AWS::AccountId', 'key/*']]
       PolicyName: rubrikEc2SnapReplicatePolicy
       Roles:
         - !Ref 'rubrikEc2SnapReplicateRole'
@@ -264,7 +290,7 @@ Resources:
               source_region: $.region
             InputTemplate: 
               Fn::Sub: |
-                { "resourceId" : <resourceId>, "source_region" : <source_region>, "destination_region" : "${destRegion}", "kmsEnabled" : "${destEncryptSnaps}", "kmsKey" : "${destKmsKey}", "debug" : "false" }
+                { "resource_id" : <resourceId>, "source_region" : <source_region>, "destination_region" : "${destRegion}", "kmsEnabled" : "${destEncryptSnaps}", "kmsKey" : "${destKmsKey}", "debug" : "false" }
           RoleArn: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
   cloudWatchEventRuleDeleteSnap:
     Type: AWS::Events::Rule
@@ -309,7 +335,7 @@ Resources:
               source_region: $.region
             InputTemplate: 
               Fn::Sub: |
-                { "resourceId" : <resourceId>, "source_region" : <source_region>,  "destination_region" : "${destRegion}", "debug" : "false" }
+                { "resource_id" : <resourceId>, "source_region" : <source_region>,  "destination_region" : "${destRegion}", "debug" : "false" }
   stepFunctionCopySnap:
     Type: AWS::StepFunctions::StateMachine
     DependsOn: rubrikEc2CopyAmiFunction

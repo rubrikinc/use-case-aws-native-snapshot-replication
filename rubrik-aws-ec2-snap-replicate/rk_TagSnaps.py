@@ -25,7 +25,7 @@ def lambda_handler(event, context):
     logger.info(data)
 
     # grab parameters from our event
-    resourceId = event['resourceId']
+    resource_id = event['resource_id']
     source_region = event['source_region']
     destination_ami_id = event['destination_ami_id']
     debug = event['debug']
@@ -37,7 +37,7 @@ def lambda_handler(event, context):
     destination_client = boto3.client('ec2', destination_region)
 
     # source AMI
-    source_ami = source_resource.Image(resourceId)
+    source_ami = source_resource.Image(resource_id)
 
     # Grab destination AMI details
     destination_ami = destination_resource.Image(destination_ami_id)

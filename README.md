@@ -1,6 +1,6 @@
 # use-case-aws-native-snapshot-replication
 
-This module takes EC2 snapshots that were created by Rubrik and replicates them to another region. Replicated snapshots will be removed when the source snapshot is removed. 
+This module takes EC2 snapshots that were created by Rubrik and replicates them to another region. Replicated snapshots will be removed when the source snapshot is removed.
 
 ## :hammer: Installation
 
@@ -11,7 +11,7 @@ This module takes EC2 snapshots that were created by Rubrik and replicates them 
 
 ## :mag: Example
 
-!image(docs/images/Create_Stack_Example.png)
+![image](docs/images/Create_Stack_Example.png)
 
 ## :blue_book: Documentation
 

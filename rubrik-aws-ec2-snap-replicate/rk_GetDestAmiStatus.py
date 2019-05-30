@@ -17,8 +17,8 @@ def lambda_handler(event, context):
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
  
-    ec2resource = boto3.resource('ec2', event['destination_region'])
-    destination_ami = ec2resource.Image(event['destination_ami_id'])
+    ec2_resource = boto3.resource('ec2', event['destination_region'])
+    destination_ami = ec2_resource.Image(event['destination_ami_id'])
 
     if event['debug']:
         logger.info('destination_ami.state is: {}'.format(destination_ami.state))
