@@ -1,0 +1,5 @@
+.vscode
+oldcode
+tests
+rubrik-aws-ec2-snap-replicate/*
+!rubrik-aws-ec2-snap-replicate/rk*.py

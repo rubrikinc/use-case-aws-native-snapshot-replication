@@ -1,0 +1,461 @@
+Description: Deploys pre-requisites for copying snapshots created by Rubrik Cloud
+  Native Protection
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Lambda Function Source Parameters
+        Parameters:
+          - lambdaBucketName
+          - rubrikIamUser
+      - Label:
+          default: Snapshot Destination Information
+        Parameters:
+#          - destAccountNumber
+          - destRegion
+          - destEncryptSnaps
+          - destKmsKey
+Parameters:
+
+  lambdaBucketName:
+      Description: "Name of the bucket containing the lambda zip file, must be in the region you are creating this stack in"
+      Type: String
+      AllowedPattern: ".+"
+  rubrikIamUser:
+    Description: Name of the IAM user that Rubrik Cloud Native Protection is configured
+      to use.
+    Type: String
+    AllowedPattern: .+
+  # destAccountNumber:
+  #   Description: AWS Account Number where the snapshots will be replicated to.
+  #   Type: String
+  #   Default: !Ref 'AWS::AccountId'
+  #   AllowedPattern: .+
+  destRegion:
+    Description: Name of the bucket containing the lambda zip file, must be in the
+      region you are creating this stack in.
+    Type: String
+    AllowedValues:
+      - ap-northeast-1
+      - ap-northeast-2
+      - ap-northeast-3
+      - ap-south-1
+      - ap-southeast-1
+      - ap-southeast-2
+      - ca-central-1
+      - cn-north-1
+      - cn-northwest-1
+      - eu-central-1
+      - eu-north-1
+      - eu-west-1
+      - eu-west-2
+      - eu-west-3
+      - sa-east-1
+      - us-east-1
+      - us-east-2
+      - us-west-1
+      - us-west-2
+      - us-gov-east-1
+      - us-gov-west-1
+    AllowedPattern: .+
+  destEncryptSnaps:
+    Description: Encrypt snapshots on the destination.
+    Type: String
+    AllowedValues:
+      - 'True'
+      - 'False'
+    AllowedPattern: .+
+  destKmsKey:
+    Description: >-
+      KMS Key in the destination region if snapshots are to be encrypted. If no key
+      is specified the default key will be used. Encrypted source snapshots will be
+      encrypted with the specified key or the default key in the region if none is
+      specified.
+    Type: String
+    Default: 'Default'
+    AllowedPattern: Default|^[a-z0-9]{8}\-[a-z0-9]{4}\-[a-z0-9]{4}\-[a-z0-9]{4}\-[a-z0-9]{12}$
+Resources:
+  rubrikEc2SnapReplicatePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: "GlobalPermissions"
+            Effect: Allow
+            Action:
+              - ec2:CopyImage
+              - ec2:CopySnapshot
+              - ec2:DeregisterImage
+              - ec2:DescribeImages
+              - ec2:DescribeSnapshots
+              - kms:ListKeys
+              - kms:ListAliases
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: '*'
+          - Sid: "EC2Permissions"
+            Effect: Allow
+            Action: ec2:DeleteSnapshot
+            Resource: !Join [':', ['arn:aws:ec2', Ref: 'destRegion', ':snapshot/*']]
+          - Sid: "RolePermissions"
+            Effect: Allow
+            Action: sts:AssumeRole
+            Resource: !Join [':', ['arn:aws:iam:', Ref: 'AWS::AccountId', 'role/rubrikEc2SnapReplicateRole']]
+          - Sid: "StateMachinePermission"
+            Effect: Allow
+            Action: states:StartExecution
+            Resource: !Join [':', ['arn:aws:states',Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'stateMachine:rk_CopySnap']]
+          - Sid: "LambdaPermissions"
+            Effect: Allow
+            Action: lambda:InvokeFunction
+            Resource:
+              - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_CopyAmi']]
+              - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_DeleteReplica']]
+              - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_GetAmiStatus']]  
+              - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_GetDestAmiStatus']]  
+              - !Join [':', ['arn:aws:lambda', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'function:rk_TagSnaps']]  
+          - Sid: "TagPermissions"
+            Effect: Allow
+            Action: ec2:CreateTags
+            Resource:
+              - !Join [':', ['arn:aws:ec2', Ref: 'destRegion',':image/*']]
+              - !Join [':', ['arn:aws:ec2', Ref: 'destRegion',':snapshot/*']]
+          - Sid: "SourceKMSPermissions"
+            Effect: Allow
+            Action: 
+              - kms:DescribeKey
+              - kms:CreateGrant
+              - kms:Decrypt
+            Resource:
+              - !Join [':', ['arn:aws:kms', Ref: 'AWS::Region', Ref: 'AWS::AccountId', 'key/*']]
+          - Sid: "TargetKMSPermissions"
+            Effect: Allow
+            Action: 
+              - kms:CreateGrant
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKeyWithoutPlaintext
+            Resource:
+              - !Join [':', ['arn:aws:kms', Ref: 'destRegion', Ref: 'AWS::AccountId', 'key/*']]
+      PolicyName: rubrikEc2SnapReplicatePolicy
+      Roles:
+        - !Ref 'rubrikEc2SnapReplicateRole'
+  rubrikEc2SnapReplicateRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - events.amazonaws.com
+                - lambda.amazonaws.com
+                - states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies: []
+      RoleName: rubrikEc2SnapReplicateRole
+  rubrikEc2CopyAmiFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: rubrikEc2SnapReplicatePolicy
+    Properties:
+      Handler: rk_CopyAmi.lambda_handler
+      Code:
+        S3Bucket: !Ref 'lambdaBucketName'
+        S3Key: "rubrik-aws-ec2-snap-replicate.zip"
+      Description: Lambda function used by Rubrik AWS Snap Replicate to copy EC2 Native
+        snapshots
+      FunctionName: rk_CopyAmi
+      Role: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+      Runtime: python3.6
+      Timeout: '180'
+  rubrikEc2DeleteReplicaFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: rubrikEc2SnapReplicatePolicy
+    Properties:
+      Handler: rk_DeleteReplica.lambda_handler
+      Code:
+        S3Bucket: !Ref 'lambdaBucketName'
+        S3Key: rubrik-aws-ec2-snap-replicate.zip
+      Description: Lambda function used by Rubrik AWS Snap Replicate to delete replicated
+        EC2 Native snapshots
+      FunctionName: rk_DeleteReplica
+      Role: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+      Runtime: python3.6
+      Timeout: '180'
+  rubrikEc2GetAmiStatusFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: rubrikEc2SnapReplicatePolicy
+    Properties:
+      Handler: rk_GetAmiStatus.lambda_handler
+      Code:
+        S3Bucket: !Ref 'lambdaBucketName'
+        S3Key: rubrik-aws-ec2-snap-replicate.zip
+      Description: Lambda function used by Rubrik AWS Snap Replicate to get copy status
+        of EC2 Native snapshots
+      FunctionName: rk_GetAmiStatus
+      Role: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+      Runtime: python3.6
+      Timeout: '180'
+  rubrikEc2GetDestAmiStatusFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: rubrikEc2SnapReplicatePolicy
+    Properties:
+      Handler: rk_GetDestAmiStatus.lambda_handler
+      Code:
+        S3Bucket: !Ref 'lambdaBucketName'
+        S3Key: rubrik-aws-ec2-snap-replicate.zip
+      Description: Lambda function used by Rubrik AWS Snap Replicate to get destination AMI copy status
+        of EC2 Native snapshots
+      FunctionName: rk_GetDestAmiStatus
+      Role: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+      Runtime: python3.6
+      Timeout: '180'
+  rubrikEc2TagSnapsFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: rubrikEc2SnapReplicatePolicy
+    Properties:
+      Handler: rk_TagSnaps.lambda_handler
+      Code:
+        S3Bucket: !Ref 'lambdaBucketName'
+        S3Key: rubrik-aws-ec2-snap-replicate.zip
+      Description: Lambda function used by Rubrik AWS Snap Replicate to tag snapshots of destination AMI
+        of EC2 Native snapshots
+      FunctionName: rk_TagSnaps
+      Role: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+      Runtime: python3.6
+      Timeout: '180'
+  lambdaInvokePermissionCopyAmi:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'rubrikEc2CopyAmiFunction.Arn'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+  lambdaInvokePermissionDeleteReplica:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'rubrikEc2DeleteReplicaFunction.Arn'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+  lambdaInvokePermissionGetAmiStatus:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'rubrikEc2GetAmiStatusFunction.Arn'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+  lambdaInvokePermissionGetDestAmiStatus:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'rubrikEc2GetDestAmiStatusFunction.Arn'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+  lambdaInvokePermissionTagSnaps:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt 'rubrikEc2TagSnapsFunction.Arn'
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+  cloudWatchEventRuleReplicateSnaps:
+    Type: AWS::Events::Rule
+    DependsOn: stepFunctionCopySnap
+    Properties:
+      Description: Replicates snapshots created by Rubrik Cloud Native Protection.
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - AWS API Call via CloudTrail
+        detail:
+          eventSource:
+            - ec2.amazonaws.com
+          eventName:
+            - CreateTags
+          requestParameters:
+            tagSet:
+              items:
+                key:
+                  - rk_cloud_native_feature_type
+                value:
+                  - CREATE_CLOUD_NATIVE_VM_SNAPSHOT
+      State: ENABLED
+      Targets:
+        - Arn: !Ref 'stepFunctionCopySnap'
+          Id: rk_stepFunctionCopySnap
+          InputTransformer:
+            InputPathsMap:
+              resourceId: $.detail.requestParameters.resourcesSet.items[0].resourceId
+              source_region: $.region
+            InputTemplate: 
+              Fn::Sub: |
+                { "resource_id" : <resourceId>, "source_region" : <source_region>, "destination_region" : "${destRegion}", "kmsEnabled" : "${destEncryptSnaps}", "kmsKey" : "${destKmsKey}", "debug" : "false" }
+          RoleArn: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+  cloudWatchEventRuleDeleteSnap:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Delete expired replicated snapshots created by Rubrik Cloud Native
+        Protection.
+      EventPattern: 
+        Fn::Sub: |
+          {
+            "detail-type": [
+              "AWS API Call via CloudTrail"
+            ],
+            "source": [
+              "aws.ec2"
+            ],
+            "detail": {
+              "responseElements": {
+                "_return": [
+                  true
+                ]
+              },
+              "eventSource": [
+                "ec2.amazonaws.com"
+              ],
+              "eventName": [
+                "DeregisterImage"
+              ],
+              "userIdentity": {
+                "userName": [
+                  "${rubrikIamUser}"
+                ]
+              }
+            }
+          }
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt 'rubrikEc2DeleteReplicaFunction.Arn'
+          Id: rk_DeleteReplica
+          InputTransformer:
+            InputPathsMap:
+              resourceId: $.detail.requestParameters.imageId
+              source_region: $.region
+            InputTemplate: 
+              Fn::Sub: |
+                { "resource_id" : <resourceId>, "source_region" : <source_region>,  "destination_region" : "${destRegion}", "debug" : "false" }
+  stepFunctionCopySnap:
+    Type: AWS::StepFunctions::StateMachine
+    DependsOn: rubrikEc2CopyAmiFunction
+    Properties:
+      StateMachineName: rk_CopySnap
+      DefinitionString: 
+        Fn::Sub: |
+          {
+            "Comment": "Copy Rubrik created AMIs and snapshots to a remote region once the AMI becomes available",
+            "StartAt": "rk_GetAmiStatus",
+            "States": {
+                "rk_StatusChoice": {
+                    "Type": "Choice",
+                    "Choices": [
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "available",
+                            "Next": "rk_CopyAmi"
+                        },
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "pending",
+                            "Next": "rk_Wait"
+                        },
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "failed",
+                            "Next": "rk_Fail"
+                        },
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "noami",
+                            "Next": "rk_NoAmi"
+                        }
+                    ]
+                },
+                "rk_DestStatusChoice": {
+                    "Type": "Choice",
+                    "Choices": [
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "failed",
+                            "Next": "rk_Fail"
+                        },
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "dest_pending",
+                            "Next": "rk_DestWait"
+                        },
+                        {
+                            "Variable": "$.rkstatus",
+                            "StringEquals": "dest_available",
+                            "Next": "rk_TagSnaps"
+                        }
+                    ]
+                },
+                "rk_CopyAmi": {
+                    "Type": "Task",
+                    "Resource": "${rubrikEc2CopyAmiFunction.Arn}",
+                    "Next": "rk_DestWait"
+                },
+                "rk_GetAmiStatus": {
+                    "Type": "Task",
+                    "Resource":  "${rubrikEc2GetAmiStatusFunction.Arn}",
+                    "Next": "rk_StatusChoice"
+                },
+                "rk_GetDestAmiStatus": {
+                    "Type": "Task",
+                    "Resource":  "${rubrikEc2GetDestAmiStatusFunction.Arn}",
+                    "Next": "rk_DestStatusChoice"
+                },
+                "rk_TagSnaps": {
+                    "Type": "Task",
+                    "Resource": "${rubrikEc2TagSnapsFunction.Arn}",
+                    "End": true
+                },
+                "rk_Wait": {
+                    "Type" : "Wait",
+                    "Seconds" : 60,
+                    "Next": "rk_GetAmiStatus"
+                },
+                "rk_DestWait": {
+                    "Type" : "Wait",
+                    "Seconds" : 60,
+                    "Next": "rk_GetDestAmiStatus"
+                },
+                "rk_Fail": {
+                    "Type": "Fail",
+                    "Cause": "AMI in failed state",
+                    "Error": "failedami"
+                },
+                "rk_NoAmi": {
+                    "Type": "Succeed"
+                }
+            }
+          }
+      RoleArn: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+Outputs:
+  rubrikEc2SnapReplicateRoleARN:
+    Description: ARN of IAM role used by Lambda
+    Value: !GetAtt 'rubrikEc2SnapReplicateRole.Arn'
+  rubrikEc2CopyAmiFunctionARN:
+    Description: ARN of the Lambda function used to copy AMIs for EC2 native protection
+    Value: !GetAtt 'rubrikEc2CopyAmiFunction.Arn'
+  rubrikEc2TagSnapsFunctionARN:
+    Description: ARN of the Lambda function used to copy AMIs for EC2 native protection
+    Value: !GetAtt 'rubrikEc2TagSnapsFunction.Arn'
+  rubrikEc2DeleteReplicaFunctionARN:
+    Description: ARN of the Lambda function used to delete AMIs for EC2 native protection
+    Value: !GetAtt 'rubrikEc2DeleteReplicaFunction.Arn'
+  rubrikEc2GetAmiStatusFunctionARN:
+    Description: ARN of the Lambda function used to get status of AMI copy jobs for EC2 native protection
+    Value: !GetAtt 'rubrikEc2GetAmiStatusFunction.Arn'
+  rubrikEc2GetDestAmiStatusFunctionARN:
+    Description: ARN of the Lambda function used to get status of AMI copy jobs for EC2 native protection
+    Value: !GetAtt 'rubrikEc2GetDestAmiStatusFunction.Arn'
+  cloudWatchEventRuleReplicateSnapsARN:
+    Description: ARN of the CloudWatch Rule used to trigger the replication of AMIs for EC2 native protection
+    Value: !GetAtt 'cloudWatchEventRuleReplicateSnaps.Arn'
+  cloudWatchEventRuleDeleteSnapARN:
+    Description: ARN of the CloudWatch Rule used to trigger the deletion of AMIs for EC2 native protection
+    Value: !GetAtt 'cloudWatchEventRuleDeleteSnap.Arn'
+
