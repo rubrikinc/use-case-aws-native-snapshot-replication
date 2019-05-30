@@ -5,11 +5,11 @@ This module takes EC2 snapshots that were created by Rubrik and replicates them 
 ## :hammer: Installation
 
 1. Create an S3 bucket for the lambda package in the same region as the Rubrik created snapshots that are to be replicated.
-2. Upload [rubrik-aws-ec2-snap-replicate.zip](https://github.com/rubrikinc/use-case-aws-native-snapshot-replication/blob/master/files/rubrik-aws-ec2-snap-replicate.zip) to the previously created bucket.
-3. Create a new CloudFormation stack using the template [http://s3.us-west-1.amazonaws.com/cloudformation-templates-rubrik-prod/rubrik-aws-ec2-snap-replicate.yml](http://s3.us-west-1.amazonaws.com/cloudformation-templates-rubrik-prod/rubrik-aws-ec2-snap-replicate.yml])
+2. Upload [rubrik-aws-ec2-snap-replicate.zip](rubrik-aws-ec2-snap-replicate.zip) to the previously created bucket.
+3. Create a new CloudFormation stack using the template from the Rubrik bucket[http://s3.us-west-1.amazonaws.com/cloudformation-templates-rubrik-prod/rubrik-aws-ec2-snap-replicate.yml](http://s3.us-west-1.amazonaws.com/cloudformation-templates-rubrik-prod/rubrik-aws-ec2-snap-replicate.yml]) or from this repo [rubrik-aws-ec2-snap-replicate.yml](rubrik-aws-ec2-snap-replicate.yml)
 4. New snapshots will be replicated to the destination region.
 
-## :mag: Example
+## :mag: Example CloudFormation Setup
 
 ![image](docs/images/Create_Stack_Example.png)
 
